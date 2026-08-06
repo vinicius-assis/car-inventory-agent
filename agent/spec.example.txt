@@ -1,0 +1,21 @@
+Build a Car Inventory Manager, a single-page React app for browsing a dealership's car inventory.
+
+Data: Cars come from a GraphQL API (already mocked in the boilerplate) with a GetCars query returning
+a list of cars, each with an id, make, model, year, color, and three image URLs (mobile, tablet,
+desktop). There is also a GetCar query for a single car by id, and an AddCar mutation that takes
+make/model/year/color and returns the newly created car.
+
+Required features:
+- Display the full list of cars fetched from the GetCars query.
+- Let the user search/filter the list by model name as they type.
+- Let the user sort the list by year or by make.
+- Cover the above with automated tests so a regression would be caught.
+
+Nice to have, if time allows:
+- Pull the GraphQL fetching logic out of the components into a reusable useCars() hook.
+- Show the car's image, picking the mobile/tablet/desktop URL based on the current viewport width
+  (mobile up to 640px, tablet from 641 to 1023px, desktop from 1024px up).
+- Present each car as a Material UI card showing make, model, year, color, and its image.
+- Add a small form to add a new car via the AddCar mutation, and show it in the list once added.
+
+Keep the UI simple and functional — clarity over polish.
