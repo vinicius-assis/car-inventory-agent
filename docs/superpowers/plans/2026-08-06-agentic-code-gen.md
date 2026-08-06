@@ -2116,3 +2116,452 @@ git commit -m "docs: add agent README with architecture and real cost numbers"
 ```
 
 Note: `generated-app/node_modules` must not be committed. If Step 3's `npm install` created one, either add `generated-app/node_modules` (and `generated-app/dist`) to a repo-root `.gitignore` before staging, or run `git status` first and confirm `node_modules` isn't in the diff before `git add generated-app`.
+
+---
+
+### Task 13: OpenAI LLM client
+
+**Files:**
+- Create: `agent/src/llm/openai-client.ts`
+- Test: `agent/src/__tests__/openai-client.test.ts`
+
+**Interfaces:**
+- Consumes: `LlmClient`, `CallStructuredParams` from Task 3 (`../llm/client.js`); `UsageStats` from Task 2 (`../types.js`).
+- Produces: `OpenAiLlmClient` (implements `LlmClient`) and `createOpenAiLlmClient(apiKey, model): OpenAiLlmClient`, a second, interchangeable implementation of the same `LlmClient` interface `AnthropicLlmClient` implements. Nothing outside `config.ts`/`index.ts` (Task 14) needs to know which one is in use — every phase (plan/generate/fix) already depends only on the `LlmClient` interface.
+
+Added because the person running this agent wants to use their existing OpenAI API access instead of (or alongside) Anthropic's. This does not replace `AnthropicLlmClient` — both coexist, selected at startup by config (Task 14).
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// agent/src/__tests__/openai-client.test.ts
+import { describe, it, expect, vi } from "vitest";
+import { OpenAiLlmClient } from "../llm/openai-client.js";
+
+function fakeOpenAiClient(
+  toolCallArgs: string | undefined,
+  usage = { prompt_tokens: 10, completion_tokens: 5 },
+) {
+  return {
+    create: vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            tool_calls: toolCallArgs === undefined ? undefined : [{ function: { name: "emit_thing", arguments: toolCallArgs } }],
+          },
+        },
+      ],
+      usage,
+    }),
+  };
+}
+
+describe("OpenAiLlmClient", () => {
+  it("parses the tool call arguments JSON and returns it", async () => {
+    const fake = fakeOpenAiClient(JSON.stringify({ content: "hello" }));
+    const client = new OpenAiLlmClient(fake as never, "gpt-4o");
+
+    const result = await client.callStructured<{ content: string }>({
+      system: "sys",
+      user: "user",
+      toolName: "emit_thing",
+      toolDescription: "desc",
+      inputSchema: { type: "object", properties: { content: { type: "string" } } },
+    });
+
+    expect(result).toEqual({ content: "hello" });
+    expect(fake.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-4o",
+        tool_choice: { type: "function", function: { name: "emit_thing" } },
+      }),
+    );
+  });
+
+  it("throws if no tool call is returned", async () => {
+    const fake = fakeOpenAiClient(undefined);
+    const client = new OpenAiLlmClient(fake as never, "gpt-4o");
+
+    await expect(
+      client.callStructured({
+        system: "sys",
+        user: "user",
+        toolName: "emit_thing",
+        toolDescription: "desc",
+        inputSchema: {},
+      }),
+    ).rejects.toThrow(/tool call/);
+  });
+
+  it("accumulates token usage across calls using prompt_tokens/completion_tokens", async () => {
+    const fake = fakeOpenAiClient(JSON.stringify({}), { prompt_tokens: 100, completion_tokens: 50 });
+    const client = new OpenAiLlmClient(fake as never, "gpt-4o");
+
+    await client.callStructured({ system: "s", user: "u", toolName: "t", toolDescription: "d", inputSchema: {} });
+    await client.callStructured({ system: "s", user: "u", toolName: "t", toolDescription: "d", inputSchema: {} });
+
+    expect(client.getUsage()).toEqual({ calls: 2, inputTokens: 200, outputTokens: 100 });
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd agent && npx vitest run src/__tests__/openai-client.test.ts`
+Expected: FAIL — `../llm/openai-client.js` does not exist yet.
+
+- [ ] **Step 3: Add the `openai` dependency**
+
+Run: `cd agent && npm install openai@^4.77.0`
+Expected: adds `openai` to `agent/package.json` dependencies and updates `agent/package-lock.json`.
+
+- [ ] **Step 4: Write `agent/src/llm/openai-client.ts`**
+
+```ts
+import OpenAI from "openai";
+import type { LlmClient, CallStructuredParams } from "./client.js";
+import type { UsageStats } from "../types.js";
+
+interface MinimalChatApi {
+  create(params: Record<string, unknown>): Promise<{
+    choices: Array<{
+      message: {
+        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+      };
+    }>;
+    usage?: { prompt_tokens: number; completion_tokens: number };
+  }>;
+}
+
+export class OpenAiLlmClient implements LlmClient {
+  private usage: UsageStats = { calls: 0, inputTokens: 0, outputTokens: 0 };
+
+  constructor(
+    private readonly client: MinimalChatApi,
+    private readonly model: string,
+  ) {}
+
+  async callStructured<T>(params: CallStructuredParams): Promise<T> {
+    const response = await this.client.create({
+      model: this.model,
+      messages: [
+        { role: "system", content: params.system },
+        { role: "user", content: params.user },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: params.toolName,
+            description: params.toolDescription,
+            parameters: params.inputSchema,
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: params.toolName } },
+    });
+
+    const usage = response.usage ?? { prompt_tokens: 0, completion_tokens: 0 };
+    this.usage.calls += 1;
+    this.usage.inputTokens += usage.prompt_tokens;
+    this.usage.outputTokens += usage.completion_tokens;
+
+    const toolCall = response.choices[0]?.message.tool_calls?.[0];
+    if (!toolCall) {
+      throw new Error(
+        `Expected a tool call from tool "${params.toolName}", got: ${JSON.stringify(response.choices[0]?.message)}`,
+      );
+    }
+    return JSON.parse(toolCall.function.arguments) as T;
+  }
+
+  getUsage(): UsageStats {
+    return { ...this.usage };
+  }
+}
+
+export function createOpenAiLlmClient(apiKey: string, model: string): OpenAiLlmClient {
+  const raw = new OpenAI({ apiKey });
+  return new OpenAiLlmClient(raw.chat.completions as unknown as MinimalChatApi, model);
+}
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `cd agent && npx vitest run src/__tests__/openai-client.test.ts`
+Expected: PASS (3 tests)
+
+- [ ] **Step 6: Run typecheck**
+
+Run: `cd agent && npm run typecheck`
+Expected: exits 0
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add agent/package.json agent/package-lock.json agent/src/llm/openai-client.ts agent/src/__tests__/openai-client.test.ts
+git commit -m "feat: add OpenAI LLM client as a second LlmClient implementation"
+```
+
+---
+
+### Task 14: Multi-provider config and cost wiring
+
+**Files:**
+- Modify: `agent/src/config.ts`
+- Modify: `agent/src/llm/cost.ts`
+- Modify: `agent/src/index.ts`
+- Modify: `agent/.env.example`
+- Test: `agent/src/__tests__/config.test.ts` (extend)
+- Test: `agent/src/__tests__/cost.test.ts` (extend)
+
+**Interfaces:**
+- Consumes: `OpenAiLlmClient`/`createOpenAiLlmClient` from Task 13; `AnthropicLlmClient`/`createAnthropicLlmClient` from Task 3.
+- Produces: `AgentConfig` gains a `provider: "anthropic" | "openai"` field; `loadConfig` picks the right API key/model/error message per provider; `estimateCostUsd` accepts an optional `model` parameter and picks pricing accordingly; the CLI bootstrap in `index.ts` constructs whichever client `config.provider` selects.
+
+- [ ] **Step 1: Update the config test**
+
+Replace the full contents of `agent/src/__tests__/config.test.ts` with:
+
+```ts
+// agent/src/__tests__/config.test.ts
+import { describe, it, expect } from "vitest";
+import { loadConfig } from "../config.js";
+
+describe("loadConfig", () => {
+  it("defaults to the anthropic provider and throws when ANTHROPIC_API_KEY is missing", () => {
+    expect(() => loadConfig({})).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it("uses the default anthropic model and fix-cycle limit when not overridden", () => {
+    const config = loadConfig({ ANTHROPIC_API_KEY: "test-key" });
+    expect(config.provider).toBe("anthropic");
+    expect(config.apiKey).toBe("test-key");
+    expect(config.model).toBe("claude-sonnet-5");
+    expect(config.maxFixCycles).toBe(3);
+  });
+
+  it("respects an ANTHROPIC_MODEL override", () => {
+    const config = loadConfig({ ANTHROPIC_API_KEY: "test-key", ANTHROPIC_MODEL: "claude-opus-5" });
+    expect(config.model).toBe("claude-opus-5");
+  });
+
+  it("switches to the openai provider when LLM_PROVIDER=openai, and throws when OPENAI_API_KEY is missing", () => {
+    expect(() => loadConfig({ LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
+  });
+
+  it("uses the default openai model when LLM_PROVIDER=openai", () => {
+    const config = loadConfig({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-key" });
+    expect(config.provider).toBe("openai");
+    expect(config.apiKey).toBe("test-key");
+    expect(config.model).toBe("gpt-4o");
+  });
+
+  it("respects an OPENAI_MODEL override", () => {
+    const config = loadConfig({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4.1" });
+    expect(config.model).toBe("gpt-4.1");
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd agent && npx vitest run src/__tests__/config.test.ts`
+Expected: FAIL — `loadConfig`'s current return type has no `provider` field, and the openai-branch tests fail since `LLM_PROVIDER` isn't handled yet.
+
+- [ ] **Step 3: Rewrite `agent/src/config.ts`**
+
+```ts
+import "dotenv/config";
+
+export interface AgentConfig {
+  provider: "anthropic" | "openai";
+  apiKey: string;
+  model: string;
+  maxFixCycles: number;
+}
+
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5";
+const DEFAULT_OPENAI_MODEL = "gpt-4o";
+const DEFAULT_MAX_FIX_CYCLES = 3;
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
+  const provider: "anthropic" | "openai" = env.LLM_PROVIDER === "openai" ? "openai" : "anthropic";
+
+  if (provider === "openai") {
+    const apiKey = env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "Missing OPENAI_API_KEY. Copy agent/.env.example to agent/.env, set LLM_PROVIDER=openai and OPENAI_API_KEY.",
+      );
+    }
+    return {
+      provider,
+      apiKey,
+      model: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+      maxFixCycles: DEFAULT_MAX_FIX_CYCLES,
+    };
+  }
+
+  const apiKey = env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing ANTHROPIC_API_KEY. Copy agent/.env.example to agent/.env and set it.");
+  }
+  return {
+    provider,
+    apiKey,
+    model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
+    maxFixCycles: DEFAULT_MAX_FIX_CYCLES,
+  };
+}
+```
+
+- [ ] **Step 4: Run the config test to verify it passes**
+
+Run: `cd agent && npx vitest run src/__tests__/config.test.ts`
+Expected: PASS (6 tests)
+
+- [ ] **Step 5: Update the cost test**
+
+Replace the full contents of `agent/src/__tests__/cost.test.ts` with:
+
+```ts
+// agent/src/__tests__/cost.test.ts
+import { describe, it, expect } from "vitest";
+import { estimateCostUsd } from "../llm/cost.js";
+
+describe("estimateCostUsd", () => {
+  it("computes cost from input and output tokens using the default (Claude Sonnet) pricing", () => {
+    const cost = estimateCostUsd({ calls: 1, inputTokens: 1_000_000, outputTokens: 1_000_000 });
+    expect(cost).toBeCloseTo(18, 5);
+  });
+
+  it("returns 0 for no usage", () => {
+    expect(estimateCostUsd({ calls: 0, inputTokens: 0, outputTokens: 0 })).toBe(0);
+  });
+
+  it("uses gpt-4o pricing when that model is passed", () => {
+    const cost = estimateCostUsd({ calls: 1, inputTokens: 1_000_000, outputTokens: 1_000_000 }, "gpt-4o");
+    expect(cost).toBeCloseTo(12.5, 5);
+  });
+
+  it("falls back to the default pricing for an unrecognized model", () => {
+    const cost = estimateCostUsd({ calls: 1, inputTokens: 1_000_000, outputTokens: 1_000_000 }, "some-future-model");
+    expect(cost).toBeCloseTo(18, 5);
+  });
+});
+```
+
+- [ ] **Step 6: Run the cost test to verify it fails**
+
+Run: `cd agent && npx vitest run src/__tests__/cost.test.ts`
+Expected: FAIL — `estimateCostUsd` doesn't accept a second argument yet, and gpt-4o pricing doesn't exist.
+
+- [ ] **Step 7: Rewrite `agent/src/llm/cost.ts`**
+
+```ts
+import type { UsageStats } from "../types.js";
+
+// Approximate pricing (USD per million tokens) at time of writing.
+// Verify against https://www.anthropic.com/pricing and https://openai.com/api/pricing
+// before relying on this for budgeting.
+const PRICING: Record<string, { inputPerMillion: number; outputPerMillion: number }> = {
+  "claude-sonnet-5": { inputPerMillion: 3, outputPerMillion: 15 },
+  "gpt-4o": { inputPerMillion: 2.5, outputPerMillion: 10 },
+};
+
+const DEFAULT_PRICING_KEY = "claude-sonnet-5";
+
+export function estimateCostUsd(usage: UsageStats, model: string = DEFAULT_PRICING_KEY): number {
+  const pricing = PRICING[model] ?? PRICING[DEFAULT_PRICING_KEY]!;
+  const inputCost = (usage.inputTokens / 1_000_000) * pricing.inputPerMillion;
+  const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputPerMillion;
+  return inputCost + outputCost;
+}
+```
+
+- [ ] **Step 8: Run the cost test to verify it passes**
+
+Run: `cd agent && npx vitest run src/__tests__/cost.test.ts`
+Expected: PASS (4 tests)
+
+- [ ] **Step 9: Wire provider selection into `agent/src/index.ts`**
+
+In `agent/src/index.ts`, change the import line:
+
+```ts
+import { createAnthropicLlmClient } from "./llm/client.js";
+```
+
+to:
+
+```ts
+import { createAnthropicLlmClient } from "./llm/client.js";
+import { createOpenAiLlmClient } from "./llm/openai-client.js";
+```
+
+Find the line inside `runAgent`'s catch block (and anywhere else `estimateCostUsd(usage)` is called) and change every call from:
+
+```ts
+estimateCostUsd(usage)
+```
+
+to:
+
+```ts
+estimateCostUsd(usage, options.model)
+```
+
+This requires `RunAgentOptions` to carry the model name through to cost estimation. Add a `model: string` field to the `RunAgentOptions` interface (next to `maxFixCycles`).
+
+In the CLI bootstrap block (the `if (isMainModule) { ... }` section), change:
+
+```ts
+const llm = createAnthropicLlmClient(config.apiKey, config.model);
+```
+
+to:
+
+```ts
+const llm =
+  config.provider === "openai"
+    ? createOpenAiLlmClient(config.apiKey, config.model)
+    : createAnthropicLlmClient(config.apiKey, config.model);
+```
+
+And add `model: config.model` to the options object passed to `runAgent(...)`, alongside the existing `specPath`/`outputDir`/`boilerplateDir`/`maxFixCycles` fields.
+
+- [ ] **Step 10: Update `agent/src/__tests__/index.test.ts`**
+
+Every call to `runAgent({ specPath, outputDir, boilerplateDir, maxFixCycles: 3 }, ...)` in the existing test file must add `model: "claude-sonnet-5"` to the options object (any string is fine — it only affects which pricing table `estimateCostUsd` picks).
+
+- [ ] **Step 11: Run the full agent test suite and typecheck**
+
+Run: `cd agent && npm test && npm run typecheck`
+Expected: all test files pass, typecheck exits 0
+
+- [ ] **Step 12: Update `agent/.env.example`**
+
+Replace the full contents of `agent/.env.example` with:
+
+```
+# Which LLM provider to use: "anthropic" (default) or "openai".
+LLM_PROVIDER=anthropic
+
+# Required when LLM_PROVIDER=anthropic.
+ANTHROPIC_API_KEY=
+# Optional: override the default Anthropic model (see agent/src/config.ts).
+ANTHROPIC_MODEL=
+
+# Required when LLM_PROVIDER=openai.
+OPENAI_API_KEY=
+# Optional: override the default OpenAI model (see agent/src/config.ts).
+OPENAI_MODEL=
+```
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add agent/src/config.ts agent/src/llm/cost.ts agent/src/index.ts agent/.env.example agent/src/__tests__/config.test.ts agent/src/__tests__/cost.test.ts agent/src/__tests__/index.test.ts
+git commit -m "feat: select LLM provider (anthropic or openai) from config"
+```
