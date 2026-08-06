@@ -96,4 +96,31 @@ describe("runAgent", () => {
     const reportOnDisk = JSON.parse(await fs.readFile(path.join(outputDir, "report.json"), "utf-8"));
     expect(reportOnDisk.success).toBe(true);
   });
+
+  it("writes a failure report.json when the pipeline throws before the fix loop runs", async () => {
+    class ThrowingFakeLlmClient implements LlmClient {
+      public usage = { calls: 0, inputTokens: 0, outputTokens: 0 };
+
+      async callStructured<T>(_params: CallStructuredParams): Promise<T> {
+        this.usage.calls += 1;
+        throw new Error("LLM returned an invalid task graph");
+      }
+
+      getUsage() {
+        return { ...this.usage };
+      }
+    }
+
+    const llm = new ThrowingFakeLlmClient();
+    const fakeRunCommand: ShellRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+
+    await expect(
+      runAgent({ specPath, outputDir, boilerplateDir, maxFixCycles: 3 }, { llm, runCommand: fakeRunCommand }),
+    ).rejects.toThrow(/invalid task graph/);
+
+    const reportOnDisk = JSON.parse(await fs.readFile(path.join(outputDir, "report.json"), "utf-8"));
+    expect(reportOnDisk.success).toBe(false);
+    expect(reportOnDisk.tasksGenerated).toBe(0);
+    expect(reportOnDisk.fix).toEqual({ success: false, cyclesUsed: 0, remainingErrors: [] });
+  });
 });

@@ -34,41 +34,62 @@ const BOILERPLATE_REFERENCE_FILES: Record<Task["kind"], string> = {
 export async function runAgent(options: RunAgentOptions, deps: RunAgentDeps): Promise<RunReport> {
   const start = Date.now();
 
-  const specText = await fs.readFile(options.specPath, "utf-8");
-  await copyBoilerplate(options.boilerplateDir, options.outputDir);
+  try {
+    const specText = await fs.readFile(options.specPath, "utf-8");
+    await copyBoilerplate(options.boilerplateDir, options.outputDir);
 
-  const tasks = await planFromSpec(specText, deps.llm);
+    const tasks = await planFromSpec(specText, deps.llm);
 
-  const fileStore = createFileStore(options.outputDir);
-  const referenceContents = new Map<string, string>();
-  for (const relPath of new Set(Object.values(BOILERPLATE_REFERENCE_FILES))) {
-    referenceContents.set(relPath, await fs.readFile(path.join(options.boilerplateDir, relPath), "utf-8"));
+    const fileStore = createFileStore(options.outputDir);
+    const referenceContents = new Map<string, string>();
+    for (const relPath of new Set(Object.values(BOILERPLATE_REFERENCE_FILES))) {
+      referenceContents.set(relPath, await fs.readFile(path.join(options.boilerplateDir, relPath), "utf-8"));
+    }
+    const boilerplateReferences: Record<Task["kind"], string> = {
+      hook: referenceContents.get(BOILERPLATE_REFERENCE_FILES.hook) ?? "",
+      component: referenceContents.get(BOILERPLATE_REFERENCE_FILES.component) ?? "",
+      test: referenceContents.get(BOILERPLATE_REFERENCE_FILES.test) ?? "",
+    };
+
+    await generateAll(tasks, fileStore, boilerplateReferences, deps.llm);
+
+    await deps.runCommand("npm", ["install"], options.outputDir, 300_000);
+
+    const fix = await fixLoop(options.outputDir, fileStore, deps.llm, deps.runCommand, options.maxFixCycles);
+
+    const usage = deps.llm.getUsage();
+    const report: RunReport = {
+      success: fix.success,
+      tasksGenerated: tasks.length,
+      fix,
+      usage,
+      estimatedCostUsd: estimateCostUsd(usage),
+      durationMs: Date.now() - start,
+    };
+
+    await fs.writeFile(path.join(options.outputDir, "report.json"), JSON.stringify(report, null, 2), "utf-8");
+
+    return report;
+  } catch (err) {
+    const usage = deps.llm.getUsage();
+    const failureReport: RunReport = {
+      success: false,
+      tasksGenerated: 0,
+      fix: { success: false, cyclesUsed: 0, remainingErrors: [] },
+      usage,
+      estimatedCostUsd: estimateCostUsd(usage),
+      durationMs: Date.now() - start,
+    };
+
+    await fs.mkdir(options.outputDir, { recursive: true });
+    await fs.writeFile(
+      path.join(options.outputDir, "report.json"),
+      JSON.stringify(failureReport, null, 2),
+      "utf-8",
+    );
+
+    throw err;
   }
-  const boilerplateReferences: Record<Task["kind"], string> = {
-    hook: referenceContents.get(BOILERPLATE_REFERENCE_FILES.hook) ?? "",
-    component: referenceContents.get(BOILERPLATE_REFERENCE_FILES.component) ?? "",
-    test: referenceContents.get(BOILERPLATE_REFERENCE_FILES.test) ?? "",
-  };
-
-  await generateAll(tasks, fileStore, boilerplateReferences, deps.llm);
-
-  await deps.runCommand("npm", ["install"], options.outputDir, 300_000);
-
-  const fix = await fixLoop(options.outputDir, fileStore, deps.llm, deps.runCommand, options.maxFixCycles);
-
-  const usage = deps.llm.getUsage();
-  const report: RunReport = {
-    success: fix.success,
-    tasksGenerated: tasks.length,
-    fix,
-    usage,
-    estimatedCostUsd: estimateCostUsd(usage),
-    durationMs: Date.now() - start,
-  };
-
-  await fs.writeFile(path.join(options.outputDir, "report.json"), JSON.stringify(report, null, 2), "utf-8");
-
-  return report;
 }
 
 export function parseArgs(argv: string[]): { specPath: string; outputDir?: string } {
