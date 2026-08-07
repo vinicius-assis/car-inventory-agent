@@ -1,6 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface GeneratedFileStore {
   write(relativePath: string, content: string): Promise<void>;
   read(relativePath: string): Promise<string>;
@@ -45,5 +54,17 @@ export async function copyBoilerplate(srcDir: string, destDir: string): Promise<
 
   for (const relPath of PLACEHOLDER_FILES) {
     await fs.rm(path.join(destDir, relPath), { force: true });
+  }
+
+  const vitestConfigPath = path.join(destDir, "vitest.config.ts");
+  if (await fileExists(vitestConfigPath)) {
+    const original = await fs.readFile(vitestConfigPath, "utf-8");
+    const patched = original.replace(
+      'setupFiles: ["./src/test-setup.ts"]',
+      'setupFiles: [resolve(__dirname, "src/test-setup.ts")]',
+    );
+    if (patched !== original) {
+      await fs.writeFile(vitestConfigPath, patched, "utf-8");
+    }
   }
 }

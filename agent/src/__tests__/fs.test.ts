@@ -86,4 +86,34 @@ describe("copyBoilerplate", () => {
     // dest must not contain itself
     await expect(fs.access(path.join(dest, "generated-app"))).rejects.toThrow();
   });
+
+  it("rewrites the copied vitest.config.ts to resolve setupFiles via __dirname instead of a bare relative path", async () => {
+    const src = path.join(tmpRoot, "src-project-4");
+    const dest = path.join(tmpRoot, "dest-project-4");
+    await fs.mkdir(src, { recursive: true });
+    await writeFixture(src);
+    await fs.writeFile(
+      path.join(src, "vitest.config.ts"),
+      [
+        'import { defineConfig } from "vitest/config";',
+        'import { resolve } from "node:path";',
+        "",
+        "export default defineConfig({",
+        "  resolve: {",
+        '    alias: { "@": resolve(__dirname, "src") },',
+        "  },",
+        "  test: {",
+        '    setupFiles: ["./src/test-setup.ts"],',
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    await copyBoilerplate(src, dest);
+
+    const copiedConfig = await fs.readFile(path.join(dest, "vitest.config.ts"), "utf-8");
+    expect(copiedConfig).toContain('setupFiles: [resolve(__dirname, "src/test-setup.ts")]');
+    expect(copiedConfig).not.toContain('setupFiles: ["./src/test-setup.ts"]');
+  });
 });
