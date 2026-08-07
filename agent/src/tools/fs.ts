@@ -33,15 +33,15 @@ const EXCLUDED_TOP_LEVEL = new Set(["node_modules", ".git", "agent", "docs", "ge
 const PLACEHOLDER_FILES = ["src/components/Example.tsx", "src/__tests__/Example.test.tsx"];
 
 export async function copyBoilerplate(srcDir: string, destDir: string): Promise<void> {
-  await fs.cp(srcDir, destDir, {
-    recursive: true,
-    filter: (source) => {
-      const rel = path.relative(srcDir, source);
-      if (rel === "") return true;
-      const topLevel = rel.split(path.sep)[0];
-      return !EXCLUDED_TOP_LEVEL.has(topLevel as string);
-    },
-  });
+  await fs.mkdir(destDir, { recursive: true });
+
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (EXCLUDED_TOP_LEVEL.has(entry.name)) continue;
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    await fs.cp(srcPath, destPath, { recursive: true });
+  }
 
   for (const relPath of PLACEHOLDER_FILES) {
     await fs.rm(path.join(destDir, relPath), { force: true });

@@ -70,4 +70,20 @@ describe("copyBoilerplate", () => {
     await expect(fs.access(path.join(dest, "src", "components", "Example.tsx"))).rejects.toThrow();
     await expect(fs.access(path.join(dest, "src", "__tests__", "Example.test.tsx"))).rejects.toThrow();
   });
+
+  it("copies successfully when dest is nested inside src (e.g. src/generated-app)", async () => {
+    const src = path.join(tmpRoot, "src-project-3");
+    const dest = path.join(src, "generated-app");
+    await fs.mkdir(src, { recursive: true });
+    await writeFixture(src);
+
+    await copyBoilerplate(src, dest);
+
+    await expect(fs.access(path.join(dest, "package.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "App.tsx"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "node_modules"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "agent"))).rejects.toThrow();
+    // dest must not contain itself
+    await expect(fs.access(path.join(dest, "generated-app"))).rejects.toThrow();
+  });
 });
