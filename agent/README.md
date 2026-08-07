@@ -135,6 +135,15 @@ OpenAI path has a real end-to-end run recorded here.
   `aria-labelledby`, or querying by role instead of label). A future version could special-case
   common MUI/Testing-Library pitfalls in the fix prompt, or give the fix loop a short library
   of known-good patterns to draw on instead of only the raw error text.
+- `copyBoilerplate`'s guard against copying a directory into its own subdirectory
+  (`agent/src/tools/fs.ts`) only checks strict path equality between a source entry and the
+  destination. It correctly handles the documented usage (`--output ../generated-app`, or any
+  output dir directly one level under the boilerplate whose name doesn't collide with an
+  existing entry) but not a destination nested two or more levels deep, or nested under a
+  directory name that already exists in the boilerplate (e.g. `--output ../src/generated`). A
+  proper fix needs a path-containment check (`destResolved.startsWith(srcPathResolved + sep)`)
+  instead of equality — flagged during final review but out of scope to fix without another
+  full review cycle, so documenting it here instead.
 - Two real, non-LLM bugs were found only by actually running the agent end-to-end against a
   real API (not caught by the unit test suite, which used sibling temp directories rather
   than the real nested-output-directory shape): `fs.cp` refuses to copy a directory into a
