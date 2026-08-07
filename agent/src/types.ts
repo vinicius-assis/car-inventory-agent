@@ -42,6 +42,7 @@ export interface FixResult {
 
 export interface RunReport {
   success: boolean;
+  error?: string;
   tasksGenerated: number;
   fix: FixResult;
   usage: UsageStats;

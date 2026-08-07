@@ -76,4 +76,24 @@ describe("fixLoop", () => {
     expect(result.cyclesUsed).toBe(2);
     expect(result.remainingErrors.length).toBeGreaterThan(0);
   });
+
+  it("does not crash when an error is attributed to a file the store doesn't have", async () => {
+    const fileStore = await makeProject();
+    const alwaysFailingRunCommand: ShellRunner = async (_cmd, args) => {
+      if (args.includes("typecheck")) {
+        return {
+          code: 1,
+          stdout: "src/graphql/client.ts(1,1): error TS2304: Cannot find name 'x'.",
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: JSON.stringify({ testResults: [] }), stderr: "" };
+    };
+
+    const result = await fixLoop(tmpRoot, fileStore, new FixingFakeLlmClient(), alwaysFailingRunCommand, 2);
+
+    expect(result.success).toBe(false);
+    expect(result.cyclesUsed).toBe(2);
+    expect(result.remainingErrors.some((e) => e.file === "src/graphql/client.ts")).toBe(true);
+  });
 });

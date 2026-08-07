@@ -37,7 +37,18 @@ export function createFileStore(rootDir: string): GeneratedFileStore {
   };
 }
 
-const EXCLUDED_TOP_LEVEL = new Set(["node_modules", ".git", "agent", "docs", "generated-app", "take-home.pdf"]);
+const EXCLUDED_TOP_LEVEL = new Set([
+  "node_modules",
+  ".git",
+  "agent",
+  "docs",
+  "generated-app",
+  "take-home.pdf",
+  "CLAUDE.md",
+  "dist",
+  ".env",
+  ".claude",
+]);
 
 const PLACEHOLDER_FILES = ["src/components/Example.tsx", "src/__tests__/Example.test.tsx"];
 
@@ -49,6 +60,7 @@ export async function copyBoilerplate(srcDir: string, destDir: string): Promise<
     if (EXCLUDED_TOP_LEVEL.has(entry.name)) continue;
     const srcPath = path.join(srcDir, entry.name);
     const destPath = path.join(destDir, entry.name);
+    if (path.resolve(srcPath) === path.resolve(destDir)) continue;
     await fs.cp(srcPath, destPath, { recursive: true });
   }
 

@@ -33,6 +33,7 @@ export async function fixLoop(
 
     const errorsByFile = groupErrorsByFile(result.errors);
     for (const [file, errors] of errorsByFile) {
+      if (!(await fileStore.has(file))) continue;
       const currentContent = await fileStore.read(file);
       const { content } = await llm.callStructured<{ content: string }>({
         ...buildFixPrompt(file, currentContent, errors),

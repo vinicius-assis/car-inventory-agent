@@ -139,5 +139,6 @@ describe("runAgent", () => {
     expect(reportOnDisk.success).toBe(false);
     expect(reportOnDisk.tasksGenerated).toBe(0);
     expect(reportOnDisk.fix).toEqual({ success: false, cyclesUsed: 0, remainingErrors: [] });
+    expect(reportOnDisk.error).toContain("invalid task graph");
   });
 });

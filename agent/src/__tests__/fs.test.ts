@@ -71,9 +71,9 @@ describe("copyBoilerplate", () => {
     await expect(fs.access(path.join(dest, "src", "__tests__", "Example.test.tsx"))).rejects.toThrow();
   });
 
-  it("copies successfully when dest is nested inside src (e.g. src/generated-app)", async () => {
+  it("copies successfully when dest is nested inside src under a non-excluded name", async () => {
     const src = path.join(tmpRoot, "src-project-3");
-    const dest = path.join(src, "generated-app");
+    const dest = path.join(src, "my-custom-output");
     await fs.mkdir(src, { recursive: true });
     await writeFixture(src);
 
@@ -84,7 +84,7 @@ describe("copyBoilerplate", () => {
     await expect(fs.access(path.join(dest, "node_modules"))).rejects.toThrow();
     await expect(fs.access(path.join(dest, "agent"))).rejects.toThrow();
     // dest must not contain itself
-    await expect(fs.access(path.join(dest, "generated-app"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "my-custom-output"))).rejects.toThrow();
   });
 
   it("rewrites the copied vitest.config.ts to resolve setupFiles via __dirname instead of a bare relative path", async () => {

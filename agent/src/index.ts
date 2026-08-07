@@ -36,12 +36,14 @@ const BOILERPLATE_REFERENCE_FILES: Record<Task["kind"], string> = {
 
 export async function runAgent(options: RunAgentOptions, deps: RunAgentDeps): Promise<RunReport> {
   const start = Date.now();
+  let tasksGenerated = 0;
 
   try {
     const specText = await fs.readFile(options.specPath, "utf-8");
     await copyBoilerplate(options.boilerplateDir, options.outputDir);
 
     const tasks = await planFromSpec(specText, deps.llm);
+    tasksGenerated = tasks.length;
 
     const fileStore = createFileStore(options.outputDir);
     const referenceContents = new Map<string, string>();
@@ -77,7 +79,8 @@ export async function runAgent(options: RunAgentOptions, deps: RunAgentDeps): Pr
     const usage = deps.llm.getUsage();
     const failureReport: RunReport = {
       success: false,
-      tasksGenerated: 0,
+      error: err instanceof Error ? err.message : String(err),
+      tasksGenerated,
       fix: { success: false, cyclesUsed: 0, remainingErrors: [] },
       usage,
       estimatedCostUsd: estimateCostUsd(usage, options.model),
