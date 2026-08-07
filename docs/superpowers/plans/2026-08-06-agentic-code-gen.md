@@ -2647,3 +2647,108 @@ Expected: all test files pass, typecheck exits 0
 git add agent/src/tools/fs.ts agent/src/__tests__/fs.test.ts
 git commit -m "fix: copy boilerplate entries individually so nested output dirs work"
 ```
+
+---
+
+### Task 16: Harden copied vitest.config.ts's setupFiles path
+
+**Files:**
+- Modify: `agent/src/tools/fs.ts`
+- Test: `agent/src/__tests__/fs.test.ts` (extend)
+
+**Interfaces:**
+- Consumes/modifies: `copyBoilerplate(srcDir, destDir)` from Task 4/15.
+- No signature change — same inputs/outputs, fixed behavior only.
+
+Found during the live end-to-end run (Task 12): the boilerplate's own `vitest.config.ts` (unmodified, provided by the challenge — do not touch the copy at the repo root) sets `test.setupFiles: ["./src/test-setup.ts"]` — a bare relative string. In this environment (verified by manually reproducing it in the actual `generated-app/` output), Vitest resolves that relative path against the wrong root once the config lives in a copied-elsewhere directory, producing `Cannot find module '<repo-root>/src/test-setup.ts'` (missing the `generated-app/` segment) even though the file exists at the correct path. Changing the line to `setupFiles: [resolve(__dirname, "src/test-setup.ts")]` (using the `resolve`/`__dirname` already imported and used for the `@` alias two lines above) fixed it when tested by hand. Since this bug lives in the boilerplate's own `vitest.config.ts` and the boilerplate itself must never be modified at the repo root, the fix is applied to the COPY inside `generated-app` only, as a small patch step at the end of `copyBoilerplate`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add this test to the `describe("copyBoilerplate", ...)` block in `agent/src/__tests__/fs.test.ts` (reuse the existing `writeFixture` helper, but note it doesn't create a `vitest.config.ts` — add one inline in this test):
+
+```ts
+  it("rewrites the copied vitest.config.ts to resolve setupFiles via __dirname instead of a bare relative path", async () => {
+    const src = path.join(tmpRoot, "src-project-4");
+    const dest = path.join(tmpRoot, "dest-project-4");
+    await fs.mkdir(src, { recursive: true });
+    await writeFixture(src);
+    await fs.writeFile(
+      path.join(src, "vitest.config.ts"),
+      [
+        'import { defineConfig } from "vitest/config";',
+        'import { resolve } from "node:path";',
+        "",
+        "export default defineConfig({",
+        "  resolve: {",
+        '    alias: { "@": resolve(__dirname, "src") },',
+        "  },",
+        "  test: {",
+        '    setupFiles: ["./src/test-setup.ts"],',
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    await copyBoilerplate(src, dest);
+
+    const copiedConfig = await fs.readFile(path.join(dest, "vitest.config.ts"), "utf-8");
+    expect(copiedConfig).toContain('setupFiles: [resolve(__dirname, "src/test-setup.ts")]');
+    expect(copiedConfig).not.toContain('setupFiles: ["./src/test-setup.ts"]');
+  });
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd agent && npx vitest run src/__tests__/fs.test.ts`
+Expected: FAIL — the copied `vitest.config.ts` still contains the original bare relative path; `copyBoilerplate` doesn't patch it yet.
+
+- [ ] **Step 3: Add the patch step to `copyBoilerplate` in `agent/src/tools/fs.ts`**
+
+Add this after the `for (const relPath of PLACEHOLDER_FILES)` cleanup loop, still inside `copyBoilerplate`:
+
+```ts
+  const vitestConfigPath = path.join(destDir, "vitest.config.ts");
+  if (await fileExists(vitestConfigPath)) {
+    const original = await fs.readFile(vitestConfigPath, "utf-8");
+    const patched = original.replace(
+      'setupFiles: ["./src/test-setup.ts"]',
+      'setupFiles: [resolve(__dirname, "src/test-setup.ts")]',
+    );
+    if (patched !== original) {
+      await fs.writeFile(vitestConfigPath, patched, "utf-8");
+    }
+  }
+```
+
+Add a small local helper (used only by the check above) near the top of the file, below the imports:
+
+```ts
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+```
+
+No new imports are needed in `fs.ts` for this step — the patch is pure string replacement on file content, using only the already-imported `fs` and `path`. The string `resolve(__dirname, "src/test-setup.ts")` written into the target file's content is text being generated, not code executed by `fs.ts` itself; the copied `vitest.config.ts` already has its own `import { resolve } from "node:path"` at its own top (untouched by this patch), so the rewritten line will compile correctly in the generated app.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd agent && npx vitest run src/__tests__/fs.test.ts`
+Expected: PASS (6 tests — the 5 existing plus the new vitest-config-patch case)
+
+- [ ] **Step 5: Run the full agent suite and typecheck**
+
+Run: `cd agent && npm test && npm run typecheck`
+Expected: all test files pass, typecheck exits 0
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add agent/src/tools/fs.ts agent/src/__tests__/fs.test.ts
+git commit -m "fix: harden copied vitest.config.ts setupFiles path resolution"
+```
