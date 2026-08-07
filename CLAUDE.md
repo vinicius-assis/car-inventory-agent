@@ -7,11 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a take-home challenge (`take-home.pdf`, mirrored in more detail in `README.md`). The root of
 the repo is a **pre-built boilerplate** for a "Car Inventory Manager" React app — it must not be
 scaffolded over, deleted, or restructured. The actual deliverable is a separate **code-generation
-agent** (planned to live in `agent/`) that reads a natural-language spec and generates a working
-implementation into a copy of this boilerplate (`generated-app/`).
+agent**, in `agent/`, that reads a natural-language spec and generates a working implementation into
+a copy of this boilerplate (`generated-app/`). The agent supports both Anthropic Claude and OpenAI
+(see `agent/README.md` and `agent/.env.example` for `LLM_PROVIDER` setup).
 
 Design and implementation planning for the agent live in `docs/superpowers/specs/` and
-`docs/superpowers/plans/` — read those before starting or resuming agent work.
+`docs/superpowers/plans/` — read those for the full history of design decisions and the task-by-task
+build log.
 
 ## Commands (root boilerplate)
 
@@ -27,8 +29,13 @@ npm run preview       # preview a production build
 Run a single test file: `npx vitest run src/__tests__/Example.test.tsx`
 Run tests matching a name: `npx vitest run -t "renders car data"`
 
-The `agent/` package (once built per the implementation plan) has its own `package.json` with the
-same `test`/`typecheck` scripts, plus `npm start -- --spec <path> --output <path>` to run the agent.
+The `agent/` package has its own `package.json` with the same `test`/`typecheck` scripts, plus
+`npm start -- --spec <path> --output <path>` to run the agent. Always run each package's scripts
+from that package's own directory (`cd agent && npm test`, not from the repo root) — Vitest's
+default test discovery is recursive, so running `npm test` from the repo root will also pick up
+`agent/src/__tests__/*.test.ts` and fail them under this config's `jsdom` environment (the agent's
+tests assume Node). This is a side effect of `agent/` existing as a sibling directory with its own
+Vitest suite, not a bug in either package's config.
 
 ## Architecture (root boilerplate)
 
