@@ -171,6 +171,14 @@ Sample run against `spec.example.txt`, using `LLM_PROVIDER=openai` / `gpt-4o` (f
 | Tasks generated | 7 (useCars hook, CarCard, CarList, AddCarForm, App, 2 tests) |
 | Result | `typecheck`: clean · `test`: 5/6 passing (1 known MUI label-association issue, see above) · `npm run dev`: starts cleanly |
 
+Note on provenance: this sample predates the `EXCLUDED_TOP_LEVEL` fix that stops `CLAUDE.md`
+(and `dist`/`.env`/`.claude`) from being copied into `generated-app/` — at the time of this
+run, `copyBoilerplate` still copied `CLAUDE.md` in, and it was removed by hand before
+committing (everything else here is untouched agent output). A fresh run with the current
+code produces the same result automatically, without manual pruning — verified separately,
+though that particular re-run landed a different (worse) generation outcome due to LLM
+non-determinism, so the originally-committed run was kept as the more representative sample.
+
 Pricing is approximate — see the comment in `src/llm/cost.ts` and verify against
 [Anthropic's](https://www.anthropic.com/pricing) or
 [OpenAI's](https://openai.com/api/pricing) current pricing before relying on this for
