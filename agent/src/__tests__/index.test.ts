@@ -81,7 +81,7 @@ describe("runAgent", () => {
     };
 
     const report = await runAgent(
-      { specPath, outputDir, boilerplateDir, maxFixCycles: 3 },
+      { specPath, outputDir, boilerplateDir, maxFixCycles: 3, model: "claude-sonnet-5" },
       { llm, runCommand: fakeRunCommand },
     );
 
@@ -115,7 +115,10 @@ describe("runAgent", () => {
     const fakeRunCommand: ShellRunner = async () => ({ code: 0, stdout: "", stderr: "" });
 
     await expect(
-      runAgent({ specPath, outputDir, boilerplateDir, maxFixCycles: 3 }, { llm, runCommand: fakeRunCommand }),
+      runAgent(
+        { specPath, outputDir, boilerplateDir, maxFixCycles: 3, model: "claude-sonnet-5" },
+        { llm, runCommand: fakeRunCommand },
+      ),
     ).rejects.toThrow(/invalid task graph/);
 
     const reportOnDisk = JSON.parse(await fs.readFile(path.join(outputDir, "report.json"), "utf-8"));

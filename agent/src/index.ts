@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { createAnthropicLlmClient } from "./llm/client.js";
+import { createOpenAiLlmClient } from "./llm/openai-client.js";
 import type { LlmClient } from "./llm/client.js";
 import { estimateCostUsd } from "./llm/cost.js";
 import { planFromSpec } from "./phases/plan.js";
@@ -18,6 +19,7 @@ export interface RunAgentOptions {
   outputDir: string;
   boilerplateDir: string;
   maxFixCycles: number;
+  model: string;
 }
 
 export interface RunAgentDeps {
@@ -63,7 +65,7 @@ export async function runAgent(options: RunAgentOptions, deps: RunAgentDeps): Pr
       tasksGenerated: tasks.length,
       fix,
       usage,
-      estimatedCostUsd: estimateCostUsd(usage),
+      estimatedCostUsd: estimateCostUsd(usage, options.model),
       durationMs: Date.now() - start,
     };
 
@@ -77,7 +79,7 @@ export async function runAgent(options: RunAgentOptions, deps: RunAgentDeps): Pr
       tasksGenerated: 0,
       fix: { success: false, cyclesUsed: 0, remainingErrors: [] },
       usage,
-      estimatedCostUsd: estimateCostUsd(usage),
+      estimatedCostUsd: estimateCostUsd(usage, options.model),
       durationMs: Date.now() - start,
     };
 
@@ -110,7 +112,10 @@ if (isMainModule) {
 
   const { specPath, outputDir } = parseArgs(process.argv.slice(2));
   const config = loadConfig();
-  const llm = createAnthropicLlmClient(config.apiKey, config.model);
+  const llm =
+    config.provider === "openai"
+      ? createOpenAiLlmClient(config.apiKey, config.model)
+      : createAnthropicLlmClient(config.apiKey, config.model);
 
   runAgent(
     {
@@ -118,6 +123,7 @@ if (isMainModule) {
       outputDir: path.resolve(outputDir ?? path.join(repoRoot, "generated-app")),
       boilerplateDir: repoRoot,
       maxFixCycles: config.maxFixCycles,
+      model: config.model,
     },
     { llm, runCommand },
   )
