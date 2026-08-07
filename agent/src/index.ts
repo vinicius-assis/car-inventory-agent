@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
+import type { AgentConfig } from "./config.js";
 import { createAnthropicLlmClient } from "./llm/client.js";
 import { createOpenAiLlmClient } from "./llm/openai-client.js";
 import type { LlmClient } from "./llm/client.js";
@@ -104,6 +105,12 @@ export function parseArgs(argv: string[]): { specPath: string; outputDir?: strin
   return { specPath: argv[specIndex + 1] as string, outputDir };
 }
 
+export function selectLlmClient(config: AgentConfig): LlmClient {
+  return config.provider === "openai"
+    ? createOpenAiLlmClient(config.apiKey, config.model)
+    : createAnthropicLlmClient(config.apiKey, config.model);
+}
+
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
@@ -112,10 +119,7 @@ if (isMainModule) {
 
   const { specPath, outputDir } = parseArgs(process.argv.slice(2));
   const config = loadConfig();
-  const llm =
-    config.provider === "openai"
-      ? createOpenAiLlmClient(config.apiKey, config.model)
-      : createAnthropicLlmClient(config.apiKey, config.model);
+  const llm = selectLlmClient(config);
 
   runAgent(
     {

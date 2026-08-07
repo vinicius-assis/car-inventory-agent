@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseArgs, runAgent } from "../index.js";
+import { parseArgs, runAgent, selectLlmClient } from "../index.js";
+import { AnthropicLlmClient } from "../llm/client.js";
 import type { LlmClient, CallStructuredParams } from "../llm/client.js";
+import { OpenAiLlmClient } from "../llm/openai-client.js";
 import type { ShellRunner } from "../tools/shell.js";
 
 describe("parseArgs", () => {
@@ -17,6 +19,18 @@ describe("parseArgs", () => {
 
   it("throws when --spec is missing", () => {
     expect(() => parseArgs(["--output", "out"])).toThrow(/Usage/);
+  });
+});
+
+describe("selectLlmClient", () => {
+  it("returns an AnthropicLlmClient instance when provider is anthropic", () => {
+    const client = selectLlmClient({ provider: "anthropic", apiKey: "k", model: "claude-sonnet-5", maxFixCycles: 3 });
+    expect(client).toBeInstanceOf(AnthropicLlmClient);
+  });
+
+  it("returns an OpenAiLlmClient instance when provider is openai", () => {
+    const client = selectLlmClient({ provider: "openai", apiKey: "k", model: "gpt-4o", maxFixCycles: 3 });
+    expect(client).toBeInstanceOf(OpenAiLlmClient);
   });
 });
 
