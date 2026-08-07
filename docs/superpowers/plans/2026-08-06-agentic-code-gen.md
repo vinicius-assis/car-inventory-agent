@@ -2565,3 +2565,85 @@ OPENAI_MODEL=
 git add agent/src/config.ts agent/src/llm/cost.ts agent/src/index.ts agent/.env.example agent/src/__tests__/config.test.ts agent/src/__tests__/cost.test.ts agent/src/__tests__/index.test.ts
 git commit -m "feat: select LLM provider (anthropic or openai) from config"
 ```
+
+---
+
+### Task 15: Fix copyBoilerplate when destDir is nested inside srcDir
+
+**Files:**
+- Modify: `agent/src/tools/fs.ts`
+- Test: `agent/src/__tests__/fs.test.ts` (extend)
+
+**Interfaces:**
+- Consumes/modifies: `copyBoilerplate(srcDir, destDir)` from Task 4.
+- No signature change — same inputs/outputs, fixed behavior only.
+
+Found during the live end-to-end run (Task 12/16): the real invocation copies the repo root (`boilerplateDir`) into `<repoRoot>/generated-app` — i.e. `destDir` is a subdirectory of `srcDir`. `fs.cp(srcDir, destDir, { recursive: true, filter })` refuses this outright with `ERR_FS_CP_EINVAL` ("cannot copy X to a subdirectory of self"), because Node's `fs.cp` checks whether `destDir` is nested inside `srcDir` on the top-level paths BEFORE any per-file `filter` callback runs — so excluding `generated-app` via the filter doesn't help; the top-level call itself is rejected before filtering ever applies. The existing test fixture in `agent/src/__tests__/fs.test.ts` used sibling directories (`src-project`/`dest-project`), so it never exercised this real-world path shape and didn't catch the bug.
+
+- [ ] **Step 1: Write the failing test**
+
+Add this test to the `describe("copyBoilerplate", ...)` block in `agent/src/__tests__/fs.test.ts` (alongside the existing two tests, reusing the same `writeFixture` helper already defined there):
+
+```ts
+  it("copies successfully when dest is nested inside src (e.g. src/generated-app)", async () => {
+    const src = path.join(tmpRoot, "src-project-3");
+    const dest = path.join(src, "generated-app");
+    await fs.mkdir(src, { recursive: true });
+    await writeFixture(src);
+
+    await copyBoilerplate(src, dest);
+
+    await expect(fs.access(path.join(dest, "package.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "src", "App.tsx"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dest, "node_modules"))).rejects.toThrow();
+    await expect(fs.access(path.join(dest, "agent"))).rejects.toThrow();
+    // dest must not contain itself
+    await expect(fs.access(path.join(dest, "generated-app"))).rejects.toThrow();
+  });
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd agent && npx vitest run src/__tests__/fs.test.ts`
+Expected: FAIL — `SystemError [ERR_FS_CP_EINVAL]: cannot copy ... to a subdirectory of self`, reproducing the exact error seen in the live run.
+
+- [ ] **Step 3: Rewrite `copyBoilerplate` in `agent/src/tools/fs.ts`**
+
+Replace the existing `copyBoilerplate` function (keep `EXCLUDED_TOP_LEVEL` and `PLACEHOLDER_FILES` as they are) with:
+
+```ts
+export async function copyBoilerplate(srcDir: string, destDir: string): Promise<void> {
+  await fs.mkdir(destDir, { recursive: true });
+
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (EXCLUDED_TOP_LEVEL.has(entry.name)) continue;
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    await fs.cp(srcPath, destPath, { recursive: true });
+  }
+
+  for (const relPath of PLACEHOLDER_FILES) {
+    await fs.rm(path.join(destDir, relPath), { force: true });
+  }
+}
+```
+
+This copies each top-level entry of `srcDir` individually instead of calling `fs.cp` on `srcDir` as a whole — since `generated-app` itself is always in `EXCLUDED_TOP_LEVEL`, it's never one of the entries copied, so `destDir` (which lives at `srcDir/generated-app`) never appears as a source path being copied into itself. Each per-entry `fs.cp(srcPath, destPath, ...)` call has `srcPath` and `destPath` in unrelated subtrees (e.g. `srcDir/src` → `destDir/src`), so Node's nested-path guard never triggers.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd agent && npx vitest run src/__tests__/fs.test.ts`
+Expected: PASS (5 tests — the 4 existing plus the new nested-dest case)
+
+- [ ] **Step 5: Run the full agent suite and typecheck**
+
+Run: `cd agent && npm test && npm run typecheck`
+Expected: all test files pass, typecheck exits 0
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add agent/src/tools/fs.ts agent/src/__tests__/fs.test.ts
+git commit -m "fix: copy boilerplate entries individually so nested output dirs work"
+```
