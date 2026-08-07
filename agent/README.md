@@ -135,6 +135,13 @@ OpenAI path has a real end-to-end run recorded here.
   `aria-labelledby`, or querying by role instead of label). A future version could special-case
   common MUI/Testing-Library pitfalls in the fix prompt, or give the fix loop a short library
   of known-good patterns to draw on instead of only the raw error text.
+  Root-caused and fixed by hand afterwards (see `../generated-app/README.md`): it was actually
+  three stacked bugs — `CarList.tsx` never wired `labelId` to the `InputLabel`'s `id`,
+  `CarCard.tsx` was missing the `data-testid` the test queried for, and the test's own expected
+  sort order was wrong (not alphabetical). None of the three needed anything MUI-specific beyond
+  the missing `labelId`/`id` pair — a fix loop that diffed against the actual DOM output (rather
+  than only re-reading the raw error string) would likely have caught the missing testid and the
+  bad assertion on its own.
 - `copyBoilerplate`'s guard against copying a directory into its own subdirectory
   (`agent/src/tools/fs.ts`) only checks strict path equality between a source entry and the
   destination. It correctly handles the documented usage (`--output ../generated-app`, or any

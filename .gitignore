@@ -1,4 +1,5 @@
 node_modules/
 dist/
+*.tsbuildinfo
 take-home.pdf
 .claude/worktrees/

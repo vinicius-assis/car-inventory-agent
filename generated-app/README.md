@@ -23,13 +23,19 @@ npm run typecheck   # tsc --noEmit
 - `src/components/AddCarForm.tsx` — form submitting the `AddCar` mutation
 - `src/__tests__/AddCarForm.test.tsx`, `src/__tests__/CarList.test.tsx` — generated tests
 
-## Known issue in this sample run
+## Fixed after generation
 
-`src/__tests__/CarList.test.tsx` fails one assertion: `getByLabelText("Sort by")` against the MUI
-`Select` doesn't resolve because MUI doesn't wire the label to the control the way Testing Library
-expects out of the box. The agent's fix loop rewrote the file three times (its retry cap) without
-landing on the right pattern (`aria-labelledby` / querying by role instead of label). This is
-documented in `../agent/README.md` under "What I'd improve with more time" and left as-is here so
-the sample reflects a real, non-cherry-picked run.
+The agent's fix loop (capped at 3 cycles) left one test failing in the original run — see
+`report.json` and `../agent/README.md` for that as-generated state. Investigating it turned up
+three separate bugs, since fixed by hand in this copy:
 
-Everything else (`npm run typecheck`, `npm run dev`, and 5 of 6 tests) passes as generated.
+- `CarList.tsx`: `InputLabel` had no `id` and `Select` had no matching `labelId`, so the label
+  was wired to a hidden native input instead of the visible `role="combobox"` element — a real
+  accessibility gap, not just a test-query quirk. Fixed by adding `id="sort-by-label"` /
+  `labelId="sort-by-label"`.
+- `CarCard.tsx`: was missing the `data-testid="car-model"` attribute the test queried for.
+- `CarList.test.tsx`: the sort-by-make assertion asserted the wrong order
+  (`["Honda Accord", "Ford Mustang", ...]`, not alphabetical) — the component's sort logic was
+  already correct; only the test's expected value was wrong.
+
+All 6 tests, `npm run typecheck`, and `npm run build` pass as of this copy.
