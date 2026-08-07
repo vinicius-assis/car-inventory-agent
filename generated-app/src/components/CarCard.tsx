@@ -23,7 +23,7 @@ const CarCard: React.FC<CarCardProps> = ({ car }) => {
         alt={`${car.make} ${car.model}`}
       />
       <CardContent>
-        <Typography variant="h6">
+        <Typography variant="h6" data-testid="car-model">
           {car.year} {car.make} {car.model}
         </Typography>
         <Typography color="text.secondary">{car.color}</Typography>

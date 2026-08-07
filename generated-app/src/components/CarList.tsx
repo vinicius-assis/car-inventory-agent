@@ -54,8 +54,9 @@ const CarList: React.FC = () => {
       />
 
       <FormControl fullWidth margin="normal">
-        <InputLabel>Sort by</InputLabel>
+        <InputLabel id="sort-by-label">Sort by</InputLabel>
         <Select
+          labelId="sort-by-label"
           value={sortCriteria}
           onChange={(e) => setSortCriteria(e.target.value as keyof Omit<Car, 'id' | 'mobile' | 'tablet' | 'desktop'>)}
           label="Sort by"

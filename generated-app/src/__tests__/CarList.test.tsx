@@ -102,7 +102,7 @@ describe("CarList component", () => {
     fireEvent.click(screen.getByText(/make/i));
 
     const carModels = screen.getAllByTestId('car-model').map((element) => element.textContent);
-    expect(carModels).toEqual(["2023 Honda Accord", "2022 Ford Mustang", "2024 Toyota Camry"]);
+    expect(carModels).toEqual(["2022 Ford Mustang", "2023 Honda Accord", "2024 Toyota Camry"]);
   });
 });
 
