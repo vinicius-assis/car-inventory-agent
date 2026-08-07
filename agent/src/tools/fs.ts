@@ -17,9 +17,14 @@ export interface GeneratedFileStore {
 }
 
 export function createFileStore(rootDir: string): GeneratedFileStore {
+  const resolvedRoot = path.resolve(rootDir);
+
   return {
     async write(relativePath, content) {
-      const target = path.join(rootDir, relativePath);
+      const target = path.resolve(rootDir, relativePath);
+      if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) {
+        throw new Error(`Refusing to write "${relativePath}": it escapes the output directory.`);
+      }
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.writeFile(target, content, "utf-8");
     },

@@ -151,6 +151,21 @@ OpenAI path has a real end-to-end run recorded here.
   proper fix needs a path-containment check (`destResolved.startsWith(srcPathResolved + sep)`)
   instead of equality — flagged during final review but out of scope to fix without another
   full review cycle, so documenting it here instead.
+- `Task.file` (the path each generated file is written to) came straight from the LLM's plan
+  response, validated only as `z.string().min(1)` — no constraint on its shape. Combined with
+  `GeneratedFileStore.write()` doing a bare `path.join(rootDir, relativePath)`, a plan response
+  containing e.g. `file: "../../outside.ts"` would have been written outside `generated-app/`
+  without any error, since `path.join` resolves `..` segments. `write()` now resolves the target
+  and rejects anything that isn't inside `rootDir` (see `agent/src/tools/fs.ts` and
+  `agent/src/__tests__/fs.test.ts`). This is the same class of bug as the `copyBoilerplate`
+  containment gap above, just on the write path instead of the copy path — that one is still open.
+- Considered, and deliberately did not build, a "does this spec fit the fixed Car/GraphQL schema"
+  guard before planning. The risk outweighs the benefit here: this challenge explicitly says specs
+  may be "modified slightly to test generalization," and any such guard (LLM-judged or heuristic)
+  has an unknown false-positive rate — it could reject a legitimately-adapted spec exactly when
+  generalization is being tested. Today an out-of-scope spec still fails, just later and less
+  legibly (as `tsc`/test errors in `validate` rather than an upfront message), which is a worse
+  failure mode but a safer one to ship without real-world tuning data.
 - Two real, non-LLM bugs were found only by actually running the agent end-to-end against a
   real API (not caught by the unit test suite, which used sibling temp directories rather
   than the real nested-output-directory shape): `fs.cp` refuses to copy a directory into a

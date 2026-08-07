@@ -27,6 +27,13 @@ describe("createFileStore", () => {
     await store.write("src/App.tsx", "export {};");
     expect(await store.has("src/App.tsx")).toBe(true);
   });
+
+  it("rejects writing to a path that escapes the store's root directory", async () => {
+    const store = createFileStore(path.join(tmpRoot, "generated-app"));
+
+    await expect(store.write("../../escaped.ts", "export {};")).rejects.toThrow(/escapes/);
+    await expect(fs.access(path.join(tmpRoot, "escaped.ts"))).rejects.toThrow();
+  });
 });
 
 describe("copyBoilerplate", () => {
